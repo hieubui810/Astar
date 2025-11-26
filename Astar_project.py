@@ -1,10 +1,11 @@
 import heapq
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-import numpy as np # Import thêm numpy để xử lý mảng tốt hơn nếu cần
+from matplotlib.widgets import TextBox, Button
+import sys
 
 # ==========================================
-# 1. DỮ LIỆU BẢN ĐỒ
+# 1. DỮ LIỆU & LOGIC A* (Giữ nguyên)
 # ==========================================
 mini_map = [
     ["1", ".", "2", "3", ".", "4", "5", ".", "6", "7"],
@@ -18,17 +19,13 @@ mini_map = [
     ["29", "30", ".", "31", "32", "33", ".", "34", "35", "."]
 ]
 
-# ==========================================
-# 2. CÁC HÀM LOGIC A* (Giữ nguyên)
-# ==========================================
 def tim_vi_tri(giatri, luoi):
     for r, dong in enumerate(luoi):
         for c, o in enumerate(dong):
-            if o == giatri: return (r, c)
+            if str(o) == str(giatri): return (r, c)
     return None
 
 def heuristic(nut, dich):
-    # Khoảng cách Manhattan
     return abs(nut[0] - dich[0]) + abs(nut[1] - dich[1])
 
 def hang_xom(nut, batdau, dich, luoi):
@@ -39,7 +36,6 @@ def hang_xom(nut, batdau, dich, luoi):
         nd, nc = dong + dx, cot + dy
         if 0 <= nd < len(luoi) and 0 <= nc < len(luoi[0]):
             o = luoi[nd][nc]
-            # Đi được nếu là đường (.) hoặc điểm Start/End
             if o == "." or (nd, nc) == batdau or (nd, nc) == dich:
                 ket_qua.append((nd, nc))
     return ket_qua
@@ -78,118 +74,145 @@ def a_sao(batdau, dich, luoi):
     return None, 0, so_node_duyet
 
 # ==========================================
-# 3. HÀM VẼ GIAO DIỆN PRO (Tích hợp số liệu & công thức)
+# 2. GIAO DIỆN BÁO CÁO (Sidebar Stats)
 # ==========================================
-# Cập nhật thêm tham số cost và opened
-def ve_do_thi_chuyen_nghiep(luoi, duong_di, batdau, dich, cost, opened, show_grid_labels=True):
-    rows = len(luoi)
-    cols = len(luoi[0])
-    
-    # Tăng kích thước khung hình để có chỗ cho phần text bên phải
-    fig, ax = plt.subplots(figsize=(12, 7)) 
-    
-    # --- PHẦN 1: VẼ BẢN ĐỒ (Bên trái) ---
-    color_map = [[0]*cols for _ in range(rows)]
-    for r in range(rows):
-        for c in range(cols):
-            if luoi[r][c] != '.' and (r, c) != batdau and (r, c) != dich:
-                color_map[r][c] = 1 
-    
-    cmap = mcolors.ListedColormap(['white', '#6FA8DC']) 
-    ax.imshow(color_map, cmap=cmap, origin='upper')
+class AStarGUI:
+    def __init__(self, luoi):
+        self.luoi = luoi
+        self.rows = len(luoi)
+        self.cols = len(luoi[0])
+        self.path_lines = []     
+        self.head_point = None
+        self.result_texts = [] # Lưu các dòng text kết quả để cập nhật
 
-    ax.set_xticks([x - 0.5 for x in range(1, cols)], minor=True)
-    ax.set_yticks([y - 0.5 for y in range(1, rows)], minor=True)
-    ax.grid(which="minor", color="lightgray", linestyle='-', linewidth=1)
-    ax.tick_params(which="minor", bottom=False, left=False)
+        # Cấu hình cửa sổ: Rộng hơn để chứa Sidebar
+        self.fig, self.ax = plt.subplots(figsize=(14, 8))
+        
+        # CHIA KHUNG HÌNH: Dành 65% bên trái cho bản đồ, 35% bên phải cho Text
+        plt.subplots_adjust(left=0.05, right=0.60, bottom=0.15, top=0.95)
+        
+        self.khoi_tao_nen()
+        self.tao_sidebar_thong_so() # Hàm mới để vẽ cột bên phải
+        self.tao_widgets()
+        
+        print("✅ Giao diện Báo cáo đã sẵn sàng!")
+        plt.show(block=True)
 
-    if duong_di:
-        path_y = [p[0] for p in duong_di]
-        path_x = [p[1] for p in duong_di]
-        ax.plot(path_x, path_y, color='#F29F3F', linewidth=5, zorder=2, label='Đường đi')
+    def khoi_tao_nen(self):
+        # Vẽ bản đồ
+        color_map = [[0]*self.cols for _ in range(self.rows)]
+        for r in range(self.rows):
+            for c in range(self.cols):
+                if self.luoi[r][c] != '.': color_map[r][c] = 1 
+        
+        cmap = mcolors.ListedColormap(['white', '#6FA8DC']) 
+        self.ax.imshow(color_map, cmap=cmap, origin='upper')
 
-    ax.text(batdau[1], batdau[0], 'A', ha='center', va='center', color='black', fontsize=16, fontweight='bold', zorder=3)
-    ax.text(dich[1], dich[0], 'B', ha='center', va='center', color='black', fontsize=16, fontweight='bold', zorder=3)
-            
-    for r in range(rows):
-        for c in range(cols):
-            txt = luoi[r][c]
-            if txt != '.':
-                ax.text(c, r, txt, ha='center', va='center', color='black', fontsize=9) 
+        self.ax.set_xticks([x - 0.5 for x in range(1, self.cols)], minor=True)
+        self.ax.set_yticks([y - 0.5 for y in range(1, self.rows)], minor=True)
+        self.ax.grid(which="minor", color="lightgray", linestyle='-', linewidth=1)
+        self.ax.tick_params(which="minor", bottom=False, left=False)
+        self.ax.set_xticks([]); self.ax.set_yticks([])
+        
+        for r in range(self.rows):
+            for c in range(self.cols):
+                txt = self.luoi[r][c]
+                if txt != '.':
+                    self.ax.text(c, r, txt, ha='center', va='center', color='black', fontsize=9, zorder=3)
 
-    if show_grid_labels:
-        ax.set_xticks(range(cols)); ax.set_xticklabels([f"{i}" for i in range(cols)], fontsize=9)
-        ax.set_yticks(range(rows)); ax.set_yticklabels([f"{i}" for i in range(rows)], fontsize=9)
-    else:
-        ax.set_xticks([]); ax.set_yticks([])
+    def tao_sidebar_thong_so(self):
+        # Vẽ các thông số cố định bên phải (Sidebar)
+        # Sử dụng tọa độ của Figure (0-1), vùng bên phải là > 0.65
+        x_pos = 0.63
+        
+        # 1. KẾT QUẢ THỰC NGHIỆM (Sẽ cập nhật số liệu)
+        self.fig.text(x_pos, 0.85, "KẾT QUẢ THỰC NGHIỆM", fontsize=14, fontweight='bold', color='darkblue')
+        self.txt_cost = self.fig.text(x_pos, 0.80, "• Tổng chi phí (Cost): ...", fontsize=12)
+        self.txt_node = self.fig.text(x_pos, 0.76, "• Số node đã duyệt: ...", fontsize=12)
+        
+        # 2. CÔNG THỨC A*
+        self.fig.text(x_pos, 0.65, "CÔNG THỨC A* CỐT LÕI", fontsize=14, fontweight='bold', color='darkred')
+        # Hộp công thức màu vàng nhạt
+        self.fig.text(x_pos, 0.58, r"$f(n) = g(n) + h(n)$", fontsize=16, 
+                      bbox={'facecolor':'#FFFFE0', 'alpha':0.5, 'pad':10})
+        
+        self.fig.text(x_pos, 0.53, "Trong đó:", fontsize=11, fontstyle='italic')
+        self.fig.text(x_pos+0.02, 0.49, "- f(n): Tổng chi phí ước tính", fontsize=11)
+        self.fig.text(x_pos+0.02, 0.46, "- g(n): Chi phí thực từ Start", fontsize=11)
+        self.fig.text(x_pos+0.02, 0.43, "- h(n): Heuristic ước tính đến End", fontsize=11)
 
-    ax.set_xlim(-0.5, cols-0.5); ax.set_ylim(rows-0.5, -0.5)
-    plt.title(f"A* Pathfinding Demo: {luoi[batdau[0]][batdau[1]]} -> {luoi[dich[0]][dich[1]]}", pad=20, fontsize=14, fontweight='bold')
+        # 3. HEURISTIC MANHATTAN
+        self.fig.text(x_pos, 0.35, "HEURISTIC (MANHATTAN)", fontsize=14, fontweight='bold', color='green')
+        self.fig.text(x_pos, 0.28, r"$h(n) = |x_1 - x_2| + |y_1 - y_2|$", fontsize=14)
 
-    # --- PHẦN 2: VẼ SỐ LIỆU & CÔNG THỨC (Bên phải) ---
-    # Điều chỉnh lề phải để tạo khoảng trống cho text
-    plt.subplots_adjust(right=0.7)
-    
-    # Vị trí x bắt đầu của cột text (tương đối so với khung hình, từ 0 đến 1)
-    text_x = 0.75 
-    
-    # 2.1. Thống kê kết quả
-    plt.figtext(text_x, 0.85, "KẾT QUẢ THỰC NGHIỆM", fontsize=12, fontweight='bold', color='darkblue')
-    plt.figtext(text_x, 0.80, f"• Tổng chi phí (Cost): {cost}", fontsize=11)
-    plt.figtext(text_x, 0.76, f"• Số node đã duyệt: {opened}", fontsize=11)
-    
-    # 2.2. Công thức thuật toán (Sử dụng LaTeX để render đẹp mắt)
-    plt.figtext(text_x, 0.65, "CÔNG THỨC A* CỐT LÕI", fontsize=12, fontweight='bold', color='darkred')
-    # Sử dụng raw string (r"...") để viết công thức LaTeX
-    plt.figtext(text_x, 0.58, r"$f(n) = g(n) + h(n)$", fontsize=14, color='black', bbox={'facecolor':'yellow', 'alpha':0.2, 'pad':5})
-    
-    plt.figtext(text_x, 0.52, "Trong đó:", fontsize=10, fontstyle='italic')
-    plt.figtext(text_x+0.02, 0.48, "- f(n): Tổng chi phí ước tính", fontsize=10)
-    plt.figtext(text_x+0.02, 0.45, "- g(n): Chi phí thực từ Start", fontsize=10)
-    plt.figtext(text_x+0.02, 0.42, "- h(n): Heuristic ước tính đến End", fontsize=10)
+    def tao_widgets(self):
+        # Ô nhập liệu nằm bên dưới bản đồ
+        ax_box_start = plt.axes([0.1, 0.05, 0.1, 0.05])
+        self.txt_start = TextBox(ax_box_start, 'Start: ', initial="1")
+        
+        ax_box_end = plt.axes([0.3, 0.05, 0.1, 0.05])
+        self.txt_end = TextBox(ax_box_end, 'End: ', initial="35")
+        
+        ax_btn = plt.axes([0.45, 0.05, 0.15, 0.05])
+        self.btn_run = Button(ax_btn, 'CHẠY', color='#90EE90', hovercolor='0.975')
+        self.btn_run.on_clicked(self.xu_ly_chay)
 
-    # 2.3. Hàm Heuristic sử dụng
-    plt.figtext(text_x, 0.32, "HEURISTIC (MANHATTAN)", fontsize=12, fontweight='bold', color='green')
-    plt.figtext(text_x, 0.25, r"$h(n) = |x_1 - x_2| + |y_1 - y_2|$", fontsize=12, color='black')
+    def xoa_duong_cu(self):
+        for line in self.path_lines: line.remove()
+        self.path_lines = []
+        if self.head_point:
+            self.head_point.remove()
+            self.head_point = None
+        self.fig.canvas.draw_idle()
 
-    # Lưu ảnh chất lượng cao
-    filename = f"astar_result_{luoi[batdau[0]][batdau[1]]}_to_{luoi[dich[0]][dich[1]]}.png"
-    plt.savefig(filename, dpi=300, bbox_inches='tight')
-    print(f"\n📸 Đã lưu ảnh kết quả chuyên nghiệp vào file: {filename}")
-    plt.show()
+    def xu_ly_chay(self, event):
+        val_start = self.txt_start.text
+        val_end = self.txt_end.text
+        
+        bd = tim_vi_tri(val_start, self.luoi)
+        dc = tim_vi_tri(val_end, self.luoi)
+        self.xoa_duong_cu() 
 
-# ==========================================
-# 4. IN BẢN ĐỒ GỐC
-# ==========================================
-def in_ban_do_goc(luoi):
-    print("\n[BẢN ĐỒ HIỆN TẠI]")
-    cols = len(luoi[0])
-    print("      " + "".join(f"{c:<4}" for c in range(cols)))
-    print("    " + "="*(cols*4))
-    for r, dong in enumerate(luoi):
-        print(f"H {r:<2} |" + "".join(f"{o:>3} " for o in dong))
-    print("\n")
+        if not bd or not dc:
+            self.txt_cost.set_text("❌ Lỗi: Số nhà không hợp lệ!")
+            self.txt_cost.set_color("red")
+            self.fig.canvas.draw_idle()
+            return
 
-# ==========================================
-# 5. CHƯƠNG TRÌNH CHÍNH
-# ==========================================
-if __name__ == "__main__":
-    in_ban_do_goc(mini_map) 
-    print("--- TÌM ĐƯỜNG A* PRO VISUALIZATION ---")
-    b_val = input("Nhập số nhà bắt đầu (1-35): ").strip()
-    d_val = input("Nhập số nhà kết thúc (1-35): ").strip()
-
-    bd = tim_vi_tri(b_val, mini_map)
-    dc = tim_vi_tri(d_val, mini_map)
-
-    if not bd or not dc:
-        print("❌ LỖI: Số nhà không hợp lệ!")
-    else:
-        path, cost, opened = a_sao(bd, dc, mini_map)
+        path, cost, opened = a_sao(bd, dc, self.luoi)
         
         if path:
-            print(f"\n✅ TÌM THẤY ĐƯỜNG ĐI! Đang tạo hình ảnh báo cáo...")
-            # Gọi hàm vẽ mới với đầy đủ tham số
-            ve_do_thi_chuyen_nghiep(mini_map, path, bd, dc, cost, opened)
+            # CẬP NHẬT KẾT QUẢ VÀO SIDEBAR
+            self.txt_cost.set_text(f"• Tổng chi phí (Cost): {cost}")
+            self.txt_cost.set_color("black")
+            self.txt_node.set_text(f"• Số node đã duyệt: {opened}")
+            
+            self.chay_animation(path)
         else:
-            print("❌ KHÔNG TÌM THẤY ĐƯỜNG ĐI (Bị chặn)!")
+            self.txt_cost.set_text("❌ Không tìm thấy đường đi!")
+            self.txt_cost.set_color("red")
+            self.fig.canvas.draw_idle()
+
+    def chay_animation(self, path):
+        x_vals = []
+        y_vals = []
+        for i in range(len(path)):
+            point = path[i]
+            y_vals.append(point[0])
+            x_vals.append(point[1])
+            
+            line, = self.ax.plot(x_vals, y_vals, color='#F29F3F', linewidth=5, zorder=2)
+            self.path_lines.append(line)
+            
+            if self.head_point: self.head_point.remove()
+            self.head_point = self.ax.scatter(point[1], point[0], color='red', s=120, zorder=4, edgecolors='white')
+            
+            self.fig.canvas.draw()
+            self.fig.canvas.flush_events()
+            plt.pause(0.1)
+
+# ==========================================
+# 3. CHƯƠNG TRÌNH CHÍNH
+# ==========================================
+if __name__ == "__main__":
+    app = AStarGUI(mini_map)
